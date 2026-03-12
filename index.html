@@ -1,1082 +1,211 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pharmacy Health QR</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap" rel="stylesheet">
+// ================================================================
+//  PharmacyQR — Google Apps Script v2.0
+//  약국마다 개별 Google Sheets 파일 자동 생성 & 분리 관리
+// ================================================================
+//
+//  ★ 설정 방법 ★
+//  1. 이 코드 전체를 복사
+//  2. script.google.com → 기존 프로젝트 열기
+//  3. 기존 코드 전체 삭제 후 붙여넣기
+//  4. ADMIN_FOLDER_ID 를 내 Google Drive 폴더 ID로 교체
+//  5. MASTER_SPREADSHEET_ID 를 기존 마스터 시트 ID로 교체
+//  6. 배포 → 새 버전으로 배포 → URL 동일하게 유지
+// ================================================================
 
-    <style>
-        :root {
-            --primary-color: #00897b;
-            --secondary-color: #cfd8dc;
-            --secondary-text: #455a64;
-            --bg-color: #f0f4f3;
-            --text-color: #333;
-            --card-bg: #ffffff;
-            --highlight-color: #e65100;
-        }
+// ★ 여기만 바꾸세요 ★
+// Google Drive에서 약국 시트들을 모아둘 폴더 ID
+// (Drive에서 폴더 열면 URL에 /folders/XXXX 부분이 ID입니다)
+const ADMIN_FOLDER_ID = '1CbAOIaV0YAxitY1OVnko28cNGRzv1N7S';
 
-        body {
-            font-family: 'Gowun Dodum', sans-serif;
-            background-color: var(--bg-color);
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
-            color: var(--text-color);
-            padding: 10px;
-            padding-top: 70px;
-            box-sizing: border-box;
-            transition: font-size 0.3s ease;
-        }
+// 전체 현황을 기록할 마스터 시트 ID (기존 그대로 사용)
+const MASTER_SPREADSHEET_ID = '1wpOmCxkBjVQYP-_1BHPMfX6uUJDZfU5yGFuiA3-qk8Q';
 
-        body.large-mode { font-size: 20px; }
-        body.normal-mode { font-size: 16px; }
+// 컬럼 헤더
+const HEADERS = [
+  '전송시각', '약국코드', '약국명', '성별/연령', '질병', '건강목표',
+  '아침식사', '식성', '흡연', '음주', '운동', '수면',
+  '복용약물요약', '고갈영양소', '추천영양성분', '전체요약'
+];
 
-        .top-controls {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            background: white;
-            padding: 10px 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            z-index: 1000;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-sizing: border-box;
-            gap: 5px;
-        }
+// ================================================================
+//  POST — 고객이 전송 버튼을 눌렀을 때
+// ================================================================
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const pharmacyCode = data.pharmacy_code || 'unknown';
+    const pharmacyName = data.pharmacy_name || '미등록약국';
 
-        .ctrl-btn {
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 15px;
-            font-family: 'Jua', sans-serif;
-            font-size: 0.85rem;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-        .lang-btn { background: #3f51b5; }
+    const row = [
+      data.timestamp || new Date().toLocaleString('ko-KR'),
+      pharmacyCode,
+      pharmacyName,
+      (data.gender || '') + '/' + (data.age || ''),
+      data.disease || '없음',
+      data.goal || '없음',
+      data.breakfast || '',
+      data.taste || '',
+      data.smoke || '',
+      data.alcohol || '',
+      data.exercise || '',
+      data.sleep || '',
+      data.summary || '',
+      data.depleted || '',
+      data.recommendations || '',
+      data.summary || ''
+    ];
 
-        .container {
-            width: 100%;
-            max-width: 450px;
-            background: var(--card-bg);
-            padding: 25px;
-            border-radius: 25px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
-            position: relative;
-            overflow: hidden;
-            margin-bottom: 50px;
-        }
+    // 1. 약국 개별 시트에 기록
+    writeToPharmacySheet(pharmacyCode, pharmacyName, row);
 
-        h1, h2, h3 { font-family: 'Jua', sans-serif; margin-top: 0; color: #2c3e50; }
-        h1 { font-size: 1.8em; color: var(--primary-color); }
-        h2 { font-size: 1.4em; margin-bottom: 25px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-        
-        .question-text {
-            font-size: 1.1em;
-            font-weight: bold;
-            margin-bottom: 15px;
-            display: block;
-            color: #444;
-        }
+    // 2. 마스터(전체현황) 시트에도 동시 기록
+    writeToMasterSheet(row);
 
-        .input-label {
-            display: block;
-            font-weight: bold;
-            margin-bottom: 5px;
-            color: #00695c;
-            margin-top: 15px;
-        }
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'success' }))
+      .setMimeType(ContentService.MimeType.JSON);
 
-        textarea {
-            width: 100%;
-            padding: 15px;
-            border: 2px solid #ddd;
-            border-radius: 12px;
-            box-sizing: border-box;
-            font-size: 1em;
-            font-family: 'Gowun Dodum', sans-serif;
-            margin-bottom: 5px;
-            min-height: 80px;
-            resize: none;
-        }
-        textarea:focus { border-color: var(--primary-color); outline: none; }
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'error', message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
 
-        .radio-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
-        .radio-item input[type="radio"] { display: none; }
-        .radio-item label {
-            display: flex;
-            align-items: center;
-            padding: 18px 20px;
-            background: #fafafa;
-            border: 2px solid #eee;
-            border-radius: 15px;
-            cursor: pointer;
-            transition: all 0.2s;
-            line-height: 1.4;
-        }
-        .radio-item label::before {
-            content: '';
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 2px solid #ccc;
-            border-radius: 50%;
-            margin-right: 15px;
-            flex-shrink: 0;
-        }
-        .radio-item input[type="radio"]:checked + label {
-            background: #e0f2f1;
-            border-color: var(--primary-color);
-            color: #00695c;
-            font-weight: bold;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-        .radio-item input[type="radio"]:checked + label::before {
-            background: var(--primary-color);
-            border-color: var(--primary-color);
-            box-shadow: inset 0 0 0 4px white;
-        }
+// ================================================================
+//  약국 개별 Sheets 파일에 기록
+//  - 해당 약국 파일이 없으면 자동 생성
+//  - Drive 폴더 안에 "[약국코드] 약국명" 이름으로 저장
+// ================================================================
+function writeToPharmacySheet(pharmacyCode, pharmacyName, row) {
+  const folder = DriveApp.getFolderById(ADMIN_FOLDER_ID);
 
-        .btn-group { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
-        .btn {
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 18px;
-            width: 100%;
-            border-radius: 12px;
-            font-size: 1.2em;
-            font-family: 'Jua', sans-serif;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .btn:active { transform: scale(0.98); }
-        .btn-prev { background-color: var(--secondary-color); color: var(--secondary-text); }
-        .btn-outline { background-color: transparent; border: 2px solid #999; color: #666; }
+  // 이미 해당 약국 파일이 있는지 확인
+  const fileName = '[' + pharmacyCode + '] ' + pharmacyName;
+  const existingFiles = folder.getFilesByName(fileName);
 
-        .page { display: none; animation: slideIn 0.4s ease-out; }
-        .page.active { display: block; }
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateX(20px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
+  let ss;
 
-        .pharmacist-summary {
-            background: #263238;
-            color: white;
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 25px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-        }
-        .summary-label { font-size: 0.9em; color: #cfd8dc; margin-bottom: 8px; display: block; }
-        .summary-content { font-size: 1.1em; font-weight: bold; line-height: 1.5; color: #fff; }
+  if (existingFiles.hasNext()) {
+    // 기존 파일 열기
+    const file = existingFiles.next();
+    ss = SpreadsheetApp.openById(file.getId());
+  } else {
+    // 신규 파일 생성
+    ss = SpreadsheetApp.create(fileName);
 
-        .result-card {
-            background: #e8f5e9;
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 20px;
-            border-left: 6px solid #4caf50;
-        }
-        .result-list li { margin-bottom: 12px; font-weight: bold; line-height: 1.5; list-style: none; padding-left: 10px; border-left: 3px solid #ccc; }
-        .cause-text { font-weight: normal; font-size: 0.9em; color: var(--highlight-color); }
-        .reason-text { display: block; font-size: 0.85em; color: #555; margin-top: 4px; font-weight: normal; }
+    // 파일을 지정 폴더로 이동
+    const newFile = DriveApp.getFileById(ss.getId());
+    folder.addFile(newFile);
+    DriveApp.getRootFolder().removeFile(newFile); // 루트에서 제거
 
-        .ref-text {
-            font-size: 0.75em;
-            color: #9ea7ad;
-            text-align: center;
-            margin-top: 15px;
-            font-style: normal;
-            letter-spacing: -0.5px;
-        }
+    // 헤더 설정
+    const sheet = ss.getActiveSheet();
+    sheet.setName('설문결과');
+    sheet.appendRow(HEADERS);
 
-        .accordion {
-            background-color: #eceff1;
-            color: #444;
-            cursor: pointer;
-            padding: 15px;
-            width: 100%;
-            border: none;
-            text-align: left;
-            outline: none;
-            font-size: 1em;
-            font-family: 'Gowun Dodum', sans-serif;
-            border-radius: 10px;
-            transition: 0.4s;
-            margin-top: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .accordion.active, .accordion:hover { background-color: #cfd8dc; }
-        .accordion:after { content: '\002B'; color: #777; font-weight: bold; float: right; margin-left: 5px; }
-        .accordion.active:after { content: "\2212"; }
-        
-        .panel {
-            padding: 0 18px;
-            background-color: white;
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.2s ease-out;
-            border-radius: 0 0 10px 10px;
-            border: 1px solid #eceff1;
-            border-top: none;
-        }
-        .review-list { padding-left: 20px; margin-top: 15px; margin-bottom: 15px; }
-        .review-list li { margin-bottom: 8px; color: #555; font-size: 0.95em; }
+    // 헤더 스타일
+    const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
+    headerRange.setBackground('#00897b');
+    headerRange.setFontColor('white');
+    headerRange.setFontWeight('bold');
+    headerRange.setFontFamily('Arial');
+    sheet.setFrozenRows(1);
 
-        body.large-mode .radio-item label { padding: 22px; }
-        body.large-mode .btn { padding: 22px; font-size: 1.4em; }
+    // 열 너비 조정
+    sheet.setColumnWidth(1, 160);  // 전송시각
+    sheet.setColumnWidth(3, 140);  // 약국명
+    sheet.setColumnWidth(5, 120);  // 질병
+    sheet.setColumnWidth(6, 160);  // 건강목표
+    sheet.setColumnWidth(14, 280); // 고갈영양소
+    sheet.setColumnWidth(15, 280); // 추천영양성분
 
-        /* ===== 복용 약물 체크박스 ===== */
-        .check-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
-        .check-item input[type="checkbox"] { display: none; }
-        .check-item label {
-            display: flex;
-            align-items: center;
-            padding: 16px 20px;
-            background: #fafafa;
-            border: 2px solid #eee;
-            border-radius: 15px;
-            cursor: pointer;
-            transition: all 0.2s;
-            line-height: 1.4;
-        }
-        .check-item label::before {
-            content: '';
-            display: inline-block;
-            width: 20px; height: 20px;
-            border: 2px solid #ccc;
-            border-radius: 5px;
-            margin-right: 14px;
-            flex-shrink: 0;
-            background: white;
-            transition: all 0.2s;
-        }
-        .check-item input[type="checkbox"]:checked + label {
-            background: #e0f2f1;
-            border-color: var(--primary-color);
-            color: #00695c;
-            font-weight: bold;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-        .check-item input[type="checkbox"]:checked + label::before {
-            background: var(--primary-color);
-            border-color: var(--primary-color);
-            box-shadow: inset 0 0 0 3px white;
-        }
-        .check-item-none label { color: #888; }
-        .check-item-none input[type="checkbox"]:checked + label { background: #f5f5f5; border-color: #9e9e9e; color: #555; }
-        .check-item-none input[type="checkbox"]:checked + label::before { background: #9e9e9e; border-color: #9e9e9e; }
-        .med-name { font-weight: bold; }
-        .med-sub { font-size: 0.78em; color: #999; font-weight: normal; display: block; margin-top: 2px; }
-        .check-item input[type="checkbox"]:checked + label .med-sub { color: #4db6ac; }
-        .med-info-box {
-            font-size: 0.88em; color: #555; background: #f0f7ff;
-            padding: 12px 15px; border-radius: 10px; margin-bottom: 20px;
-            border-left: 4px solid #5c9cf5; line-height: 1.6;
-        }
-        body.large-mode .check-item label { padding: 20px; }
+    // 안내 시트 추가
+    const infoSheet = ss.insertSheet('📋 약국정보');
+    infoSheet.appendRow(['약국코드', pharmacyCode]);
+    infoSheet.appendRow(['약국명', pharmacyName]);
+    infoSheet.appendRow(['생성일', new Date().toLocaleString('ko-KR')]);
+    infoSheet.appendRow(['안내', '이 시트는 PharmacyQR 어드민이 관리합니다.']);
+    infoSheet.getRange('A1:B4').setFontFamily('Arial');
+    infoSheet.getRange('A1:A4').setFontWeight('bold').setFontColor('#00897b');
 
-        /* ===== 영양소 상태 바 차트 ===== */
-        .nutrient-chart-wrap {
-            background: #fff; border-radius: 15px; padding: 20px;
-            border: 1px solid #eee; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            margin-bottom: 20px;
-        }
-        .nutrient-bar-row { margin-bottom: 14px; }
-        .nutrient-bar-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-        .nutrient-bar-name { font-weight: bold; font-size: 0.9em; color: #333; }
-        .nutrient-bar-status { font-size: 0.78em; font-weight: bold; padding: 2px 10px; border-radius: 20px; }
-        .status-bad  { color: #c62828; background: #ffebee; }
-        .status-warn { color: #e65100; background: #fff3e0; }
-        .status-good { color: #2e7d32; background: #e8f5e9; }
-        .nutrient-bar-track { width: 100%; height: 18px; background: #f0f0f0; border-radius: 20px; overflow: hidden; }
-        .nutrient-bar {
-            height: 100%; width: 0; border-radius: 20px;
-            transition: width 1.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .nutrient-bar-red    { background: linear-gradient(90deg, #f44336, #ef5350); }
-        .nutrient-bar-orange { background: linear-gradient(90deg, #ff9800, #ffa726); }
-        .nutrient-bar-green  { background: linear-gradient(90deg, #43a047, #66bb6a); }
-        .chart-legend { display: flex; gap: 14px; margin-top: 14px; font-size: 0.8em; color: #666; flex-wrap: wrap; }
-        .chart-legend span { display: flex; align-items: center; gap: 5px; }
-        .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-    </style>
-</head>
-<body class="normal-mode">
+    // 시트 순서 정렬 (설문결과 탭이 앞으로)
+    ss.setActiveSheet(ss.getSheetByName('설문결과'));
+    ss.moveActiveSheet(1);
+  }
 
-    <div class="top-controls">
-        <span style="font-family:'Jua'; color:var(--primary-color); font-size:1.1rem;">PharmacyQR</span>
-        <div>
-            <button class="ctrl-btn lang-btn" onclick="toggleLanguage()">🇰🇷/🇺🇸 Eng</button>
-            <button class="ctrl-btn font-toggle-btn" onclick="toggleFontSize()">글자+ 🔍</button>
-        </div>
-    </div>
+  // 데이터 행 추가
+  const sheet = ss.getSheetByName('설문결과') || ss.getActiveSheet();
+  sheet.appendRow(row);
 
-    <div class="container">
-        <div id="p1" class="page active">
-            <div style="text-align: center; margin-top: 30px;">
-                <h1 data-i18n="p1_title">환영합니다!</h1>
-                <p data-i18n="p1_desc">약국 대기 시간 동안,<br>나에게 꼭 맞는 영양소를 찾아보세요.</p>
-                <div style="font-size: 100px; margin: 20px 0;">💊</div>
-                <button class="btn" onclick="nextPage(1)" data-i18n="btn_start">건강 점검 시작하기</button>
-            </div>
-        </div>
+  // 짝수/홀수 줄 색상
+  const lastRow = sheet.getLastRow();
+  if (lastRow % 2 === 0) {
+    sheet.getRange(lastRow, 1, 1, HEADERS.length).setBackground('#f0f4f3');
+  }
 
-        <div id="p2" class="page">
-            <h2 data-i18n="p2_title">📝 기본 정보를 선택해주세요</h2>
-            <span class="question-text" data-i18n="q_gender">성별</span>
-            <div class="radio-group" style="flex-direction: row;">
-                <div class="radio-item" style="flex:1"><input type="radio" name="gender" id="g_m" value="male"><label for="g_m" style="justify-content:center;" data-i18n="opt_male">남성</label></div>
-                <div class="radio-item" style="flex:1"><input type="radio" name="gender" id="g_f" value="female"><label for="g_f" style="justify-content:center;" data-i18n="opt_female">여성</label></div>
-            </div>
-            <span class="question-text" data-i18n="q_age">연령대</span>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="age" id="a1" value="growth"><label for="a1" data-i18n="opt_age1">12세 미만 (성장기 어린이)</label></div>
-                <div class="radio-item"><input type="radio" name="age" id="a2" value="teen"><label for="a2" data-i18n="opt_age2">13세 ~ 18세 (청소년)</label></div>
-                <div class="radio-item"><input type="radio" name="age" id="a3" value="young"><label for="a3" data-i18n="opt_age3">19세 ~ 34세 (청년)</label></div>
-                <div class="radio-item"><input type="radio" name="age" id="a4" value="middle"><label for="a4" data-i18n="opt_age4">35세 ~ 49세 (중년)</label></div>
-                <div class="radio-item"><input type="radio" name="age" id="a5" value="late_middle"><label for="a5" data-i18n="opt_age5">50세 ~ 64세 (장년)</label></div>
-                <div class="radio-item"><input type="radio" name="age" id="a6" value="senior"><label for="a6" data-i18n="opt_age6">65세 이상 (어르신)</label></div>
-            </div>
-            <div class="btn-group">
-                <button class="btn" onclick="nextPage(2)" data-i18n="btn_next">다음 단계로</button>
-                <button class="btn btn-prev" onclick="prevPage(2)" data-i18n="btn_prev">이전 단계</button>
-            </div>
-        </div>
+  return ss.getId();
+}
 
-        <div id="p3" class="page">
-            <h2 data-i18n="p3_title">🏥 건강 상태 및 목표</h2>
-            
-            <span class="input-label" data-i18n="q_disease">현재 앓고 있거나 치료 중인 질병</span>
-            <textarea id="diseaseInput" placeholder="예: 고혈압, 당뇨, 없음 ..."></textarea>
-            
-            <span class="input-label" data-i18n="q_goal">건강 지향점 (개선하고 싶은 점)</span>
-            <textarea id="goalInput" placeholder="예: 임신준비, 갱년기증상완화, 수험생 기억력 개선, 피부관리, 다이어트 등"></textarea>
+// ================================================================
+//  마스터(전체현황) 시트에 기록
+// ================================================================
+function writeToMasterSheet(row) {
+  try {
+    const ss = SpreadsheetApp.openById(MASTER_SPREADSHEET_ID);
+    let sheet = ss.getSheetByName('📊 전체현황');
 
-            <p style="font-size: 0.9em; color: #888; background:#f9f9f9; padding:10px; border-radius:8px;" data-i18n="p3_note">* 작성해주시면 현재 드시는 약과 충돌하지 않고, 목표에 맞는 영양제를 추천해 드립니다.</p>
-            
-            <div class="btn-group">
-                <button class="btn" onclick="nextPage(3)" data-i18n="btn_next">다음 단계로</button>
-                <button class="btn btn-prev" onclick="prevPage(3)" data-i18n="btn_prev">이전 단계</button>
-            </div>
-            <p class="ref-text">Ref) Cohen, M. H. (2010). Drug-Nutrient Interactions Handbook.</p>
-        </div>
-
-        <div id="p4" class="page">
-            <h2 data-i18n="p4_title">🍚 식습관 점검</h2>
-            <span class="question-text" data-i18n="q_bf">Q1. 아침 식사는 잘 챙기시나요?</span>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="breakfast" id="bf1" value="0"><label for="bf1" data-i18n="opt_bf1">매일 규칙적으로 먹어요</label></div>
-                <div class="radio-item"><input type="radio" name="breakfast" id="bf2" value="1"><label for="bf2" data-i18n="opt_bf2">가끔 먹거나 대충 때워요</label></div>
-                <div class="radio-item"><input type="radio" name="breakfast" id="bf3" value="2"><label for="bf3" data-i18n="opt_bf3">커피나 음료로 대신해요</label></div>
-                <div class="radio-item"><input type="radio" name="breakfast" id="bf4" value="2"><label for="bf4" data-i18n="opt_bf4">거의 안 먹어요 (아침 결식)</label></div>
-            </div>
-            <span class="question-text" data-i18n="q_taste">Q2. 평소 어떤 맛을 좋아하시나요?</span>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="taste" id="t1" value="0"><label for="t1" data-i18n="opt_t1">싱겁고 담백한 맛</label></div>
-                <div class="radio-item"><input type="radio" name="taste" id="t2" value="1"><label for="t2" data-i18n="opt_t2">일반적인 집밥</label></div>
-                <div class="radio-item"><input type="radio" name="taste" id="t3" value="2"><label for="t3" data-i18n="opt_t3">달고 짠 음식 (단짠)</label></div>
-                <div class="radio-item"><input type="radio" name="taste" id="t4" value="2"><label for="t4" data-i18n="opt_t4">맵고 자극적인 국물 요리</label></div>
-            </div>
-            <div class="btn-group">
-                <button class="btn" onclick="nextPage(4)" data-i18n="btn_next">다음 단계로</button>
-                <button class="btn btn-prev" onclick="prevPage(4)" data-i18n="btn_prev">이전 단계</button>
-            </div>
-            <p class="ref-text">Ref) WHO Guideline: Sodium intake for adults and children & Balanced Diet.</p>
-        </div>
-
-        <div id="p5" class="page">
-            <h2 data-i18n="p5_title">🍷 기호 식품 습관</h2>
-            <span class="question-text" data-i18n="q_smoke">Q3. 담배를 태우시나요?</span>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="smoke" id="s1" value="0"><label for="s1" data-i18n="opt_s1">아니오 (비흡연)</label></div>
-                <div class="radio-item"><input type="radio" name="smoke" id="s2" value="1"><label for="s2" data-i18n="opt_s2">가끔 (하루 5개비 미만)</label></div>
-                <div class="radio-item"><input type="radio" name="smoke" id="s3" value="2"><label for="s3" data-i18n="opt_s3">습관적 (하루 반 갑 정도)</label></div>
-                <div class="radio-item"><input type="radio" name="smoke" id="s4" value="3"><label for="s4" data-i18n="opt_s4">많이 (하루 한 갑 이상)</label></div>
-            </div>
-            <span class="question-text" data-i18n="q_alcohol">Q4. 술은 얼마나 자주 드시나요?</span>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="alcohol" id="al1" value="0"><label for="al1" data-i18n="opt_a1">거의 안 마심</label></div>
-                <div class="radio-item"><input type="radio" name="alcohol" id="al2" value="1"><label for="al2" data-i18n="opt_a2">월 2 ~ 3회 정도</label></div>
-                <div class="radio-item"><input type="radio" name="alcohol" id="al3" value="2"><label for="al3" data-i18n="opt_a3">주 2 ~ 3회 (반주 포함)</label></div>
-                <div class="radio-item"><input type="radio" name="alcohol" id="al4" value="3"><label for="al4" data-i18n="opt_a4">주 4회 이상 자주 마심</label></div>
-            </div>
-            <div class="btn-group">
-                <button class="btn" onclick="nextPage(5)" data-i18n="btn_next">다음 단계로</button>
-                <button class="btn btn-prev" onclick="prevPage(5)" data-i18n="btn_prev">이전 단계</button>
-            </div>
-            <p class="ref-text">Ref) Preston, A. M. (1991). Cigarette smoking-nutritional implications.</p>
-        </div>
-
-        <div id="p6" class="page">
-            <h2 data-i18n="p6_title">🏃 생활 리듬 점검</h2>
-            <span class="question-text" data-i18n="q_exercise">Q5. 운동은 얼마나 하시나요?</span>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="exercise" id="ex1" value="0"><label for="ex1" data-i18n="opt_ex1">주 3회 이상 땀나게 운동</label></div>
-                <div class="radio-item"><input type="radio" name="exercise" id="ex2" value="1"><label for="ex2" data-i18n="opt_ex2">주 1 ~ 2회 가볍게</label></div>
-                <div class="radio-item"><input type="radio" name="exercise" id="ex3" value="2"><label for="ex3" data-i18n="opt_ex3">따로 운동 안 함</label></div>
-                <div class="radio-item"><input type="radio" name="exercise" id="ex4" value="2"><label for="ex4" data-i18n="opt_ex4">움직임이 거의 없음</label></div>
-            </div>
-            <span class="question-text" data-i18n="q_sleep">Q6. 잠은 푹 주무시나요?</span>
-            <div class="radio-group">
-                <div class="radio-item"><input type="radio" name="sleep" id="sl1" value="0"><label for="sl1" data-i18n="opt_sl1">7시간 이상 푹 잠</label></div>
-                <div class="radio-item"><input type="radio" name="sleep" id="sl2" value="1"><label for="sl2" data-i18n="opt_sl2">6 ~ 7시간 (보통)</label></div>
-                <div class="radio-item"><input type="radio" name="sleep" id="sl3" value="2"><label for="sl3" data-i18n="opt_sl3">5 ~ 6시간 (피곤함)</label></div>
-                <div class="radio-item"><input type="radio" name="sleep" id="sl4" value="3"><label for="sl4" data-i18n="opt_sl4">5시간 미만 (항상 피곤)</label></div>
-            </div>
-            <div class="btn-group">
-                <button class="btn" onclick="nextPage(6)" data-i18n="btn_next">다음 단계로</button>
-                <button class="btn btn-prev" onclick="prevPage(6)" data-i18n="btn_prev">이전 단계</button>
-            </div>
-            <p class="ref-text">Ref) CDC Physical Activity Guidelines & National Sleep Foundation.</p>
-        </div>
-
-        <!-- ===== p7: 복용 약물 선택 (NEW) ===== -->
-        <div id="p7" class="page">
-            <h2 data-i18n="p7_title">💊 복용 중인 약물</h2>
-            <div class="med-info-box" data-i18n="p7_sub">
-                복용 중인 약은 체내 영양소를 소모시킬 수 있습니다.<br>
-                해당하는 것을 <strong>모두 선택</strong>해 주세요. (없으면 마지막 항목 선택)
-            </div>
-
-            <div class="check-group" id="medCheckGroup">
-                <div class="check-item">
-                    <input type="checkbox" name="meds" id="med_bp" value="bp">
-                    <label for="med_bp">
-                        <span class="med-name" data-i18n="opt_bp">혈압약</span>
-                        <span class="med-sub" data-i18n="sub_bp">이뇨제 / ACE억제제 / ARB 계열</span>
-                    </label>
-                </div>
-                <div class="check-item">
-                    <input type="checkbox" name="meds" id="med_dm" value="dm">
-                    <label for="med_dm">
-                        <span class="med-name" data-i18n="opt_dm">당뇨약</span>
-                        <span class="med-sub" data-i18n="sub_dm">메트포르민 / 인슐린 계열</span>
-                    </label>
-                </div>
-                <div class="check-item">
-                    <input type="checkbox" name="meds" id="med_chol" value="chol">
-                    <label for="med_chol">
-                        <span class="med-name" data-i18n="opt_chol">콜레스테롤약</span>
-                        <span class="med-sub" data-i18n="sub_chol">스타틴 계열 (아토르바스타틴 등)</span>
-                    </label>
-                </div>
-                <div class="check-item">
-                    <input type="checkbox" name="meds" id="med_gi" value="gi">
-                    <label for="med_gi">
-                        <span class="med-name" data-i18n="opt_gi">위장약</span>
-                        <span class="med-sub" data-i18n="sub_gi">PPI / H2차단제 / 제산제 계열</span>
-                    </label>
-                </div>
-                <div class="check-item check-item-none">
-                    <input type="checkbox" name="meds" id="med_none" value="none">
-                    <label for="med_none">
-                        <span class="med-name" data-i18n="opt_meds_none">복용 약물 없음</span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="btn-group">
-                <button class="btn" onclick="calculateAndShowResults()" data-i18n="btn_result">결과 보기</button>
-                <button class="btn btn-prev" onclick="prevPage(7)" data-i18n="btn_prev">이전 단계</button>
-            </div>
-            <p class="ref-text">Ref) Cohen, S. (2011). Drug Muggers: Which Medications Are Robbing Your Body of Essential Nutrients.</p>
-        </div>
-
-        <!-- ===== p8: 영양소 고갈 결과 (구 p7) ===== -->
-        <div id="p8" class="page">
-            <h2 data-i18n="p7_title">😱 내 몸에서 부족해지는 영양소</h2>
-            <p data-i18n="p7_desc">고객님의 생활 습관으로 인해 <strong style="color:red;">빠져나가고 있는 영양소</strong>입니다.<br>괄호 안은 해당 영양소를 소모시키는 주요 원인입니다.</p>
-
-            <div class="result-card" style="border-left-color: #ff9800; background: #fff3e0;">
-                <h3 style="color:#ef6c00;" data-i18n="res_depleted_title">📉 고갈 주의 영양소</h3>
-                <ul id="depletedList" class="result-list"></ul>
-            </div>
-
-            <!-- 영양소 상태 바 차트 -->
-            <div class="nutrient-chart-wrap">
-                <h3 style="font-size:1em; color:#444; margin:0 0 15px;" data-i18n="chart_title">📊 영양소 상태 분석</h3>
-                <div id="nutrientBarsContainer"></div>
-                <div class="chart-legend">
-                    <span><span class="legend-dot" style="background:#f44336;"></span><span data-i18n="status_bad">부족</span></span>
-                    <span><span class="legend-dot" style="background:#ff9800;"></span><span data-i18n="status_warn">주의</span></span>
-                    <span><span class="legend-dot" style="background:#43a047;"></span><span data-i18n="status_good">양호</span></span>
-                </div>
-            </div>
-
-            <div class="btn-group">
-                <button class="btn" onclick="nextPage(8)" data-i18n="btn_pharm_view">약사님께 보여줄 화면 ></button>
-                <button class="btn btn-prev" onclick="prevPage(8)" data-i18n="btn_prev">이전 단계</button>
-            </div>
-            <p class="ref-text">Ref) Pelton, R., & LaValle, J. B. (2000). The Drug-Induced Nutrient Depletion Handbook.</p>
-        </div>
-
-        <div id="p9" class="page">
-            <h2 style="color:var(--primary-color);" data-i18n="p8_title">✅ 상담용 결과 화면</h2>
-            <p style="text-align:center; font-size:0.9em; margin-bottom:20px;" data-i18n="p8_sub">이 화면을 약사님께 보여주세요.</p>
-
-            <div class="pharmacist-summary">
-                <span class="summary-label" data-i18n="pharm_sum_label">💊 약사님 확인용 요약</span>
-                <div class="summary-content" id="pharmacistSummaryText"></div>
-                <div style="margin-top:10px; font-size:0.95em; color:#ffe0b2;">
-                    <span data-i18n="label_disease">특이사항</span>: <span id="diseaseSummaryText"></span><br>
-                    <span data-i18n="label_goal">건강목표</span>: <span id="goalSummaryText" style="color:#fff; font-weight:bold;"></span>
-                </div>
-            </div>
-
-            <div class="result-card">
-                <h3 data-i18n="res_rec_title">💡 추천 영양 성분</h3>
-                <ul id="productRecs" class="result-list" style="color: #2e7d32;"></ul>
-            </div>
-
-            <button class="accordion" data-i18n="btn_show_answers">📋 나의 답변 내용 전체보기</button>
-            <div class="panel">
-                <ul class="review-list" id="myAnswersList"></ul>
-            </div>
-
-            <div id="consentSection" style="margin-top: 25px; padding: 20px; background: #f0f7ff; border-radius: 15px; border: 2px solid #90caf9;">
-                <h3 style="color: #1565c0; margin-bottom: 8px; font-size: 1.1em;">📤 상담 결과 약사님께 전송</h3>
-                <p style="font-size: 0.88em; color: #555; margin-bottom: 15px; line-height: 1.6;">
-                    위의 건강 설문 결과를 약사님이 확인할 수 있도록 전송합니다.<br>
-                    개인 건강 정보가 포함되므로, 동의 후 전송됩니다.
-                </p>
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 14px; background: white; border-radius: 10px; border: 1px solid #ddd; cursor: pointer;" onclick="document.getElementById('consentCheck').click()">
-                    <input type="checkbox" id="consentCheck" onchange="toggleSubmitBtn()" style="width: 24px; height: 24px; cursor: pointer; accent-color: #00897b; flex-shrink: 0;">
-                    <label for="consentCheck" style="font-weight: bold; color: #333; cursor: pointer; font-size: 0.95em; line-height: 1.4;" onclick="event.stopPropagation()">
-                        📋 상담 결과 전송에 <span style="color: #00897b;">동의합니다</span>
-                    </label>
-                </div>
-                <button class="btn" id="submitBtn" onclick="submitConsultation()" disabled style="opacity: 0.4; background: #1565c0;">
-                    📤 상담 결과 전송하기
-                </button>
-                <div id="submitResult" style="display: none; margin-top: 15px; padding: 15px; border-radius: 10px; text-align: center; font-size: 0.95em; line-height: 1.5;"></div>
-            </div>
-
-            <button class="btn btn-outline" onclick="location.reload()" style="margin-top:20px;" data-i18n="btn_home">처음으로 돌아가기</button>
-        </div>
-    </div>
-
-<script>
-    // ============================================================
-    //  ★ 어드민 설정 — 이 URL만 바꾸면 됩니다 ★
-    // ============================================================
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzaz9uz9hgIB1jnEvERLhDFqayPhFfVGak8kiszKk8TniM-6C0nH6IeX-9xTZAsHt1N/exec';
-
-    // ============================================================
-    //  URL 파라미터에서 약국 코드 & 약국명 읽기
-    //  예: index.html?pharmacy=gangnam001&name=강남온누리약국
-    // ============================================================
-    const urlParams = new URLSearchParams(window.location.search);
-    const PHARMACY_CODE = urlParams.get('pharmacy') || 'unknown';
-    const PHARMACY_NAME = urlParams.get('name') ? decodeURIComponent(urlParams.get('name')) : '약국';
-
-    // 페이지 타이틀 & 상단 로고에 약국명 표시
-    document.addEventListener('DOMContentLoaded', function() {
-        document.title = PHARMACY_NAME + ' | 건강 설문';
-        const logoEl = document.querySelector('.top-controls span');
-        if (logoEl) logoEl.textContent = '💊 ' + PHARMACY_NAME;
-        // p1 환영 메시지에 약국명 삽입
-        const p1desc = document.querySelector('#p1 p[data-i18n="p1_desc"]');
-        if (p1desc) p1desc.innerHTML = '<strong>' + PHARMACY_NAME + '</strong>에 오신 것을 환영합니다!<br>잠깐의 시간으로 나에게 꼭 맞는 영양소를 찾아보세요.';
-    });
-
-    let collectData = {};
-
-    function toggleSubmitBtn() {
-        const checked = document.getElementById('consentCheck').checked;
-        const btn = document.getElementById('submitBtn');
-        btn.disabled = !checked;
-        btn.style.opacity = checked ? '1' : '0.4';
+    if (!sheet) {
+      sheet = ss.insertSheet('📊 전체현황');
+      sheet.appendRow(HEADERS);
+      const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
+      headerRange.setBackground('#263238');
+      headerRange.setFontColor('white');
+      headerRange.setFontWeight('bold');
+      sheet.setFrozenRows(1);
     }
 
-    function submitConsultation() {
-        if (APPS_SCRIPT_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') {
-            alert('⚠️ 아직 Google Apps Script URL이 설정되지 않았습니다.\n함께 드린 설정 안내 파일을 참고해주세요!');
-            return;
-        }
+    sheet.appendRow(row);
 
-        const btn = document.getElementById('submitBtn');
-        const resultDiv = document.getElementById('submitResult');
-
-        btn.disabled = true;
-        btn.textContent = '⏳ 전송 중...';
-
-        const depletedItems = Array.from(document.querySelectorAll('#depletedList li'))
-            .map(li => li.innerText.replace(/\n/g, ' ')).join(' / ');
-        const recItems = Array.from(document.querySelectorAll('#productRecs li'))
-            .map(li => li.innerText.replace(/\n/g, ' ')).join(' / ');
-
-        const payload = {
-            pharmacy_code: PHARMACY_CODE,
-            pharmacy_name: PHARMACY_NAME,
-            ...collectData,
-            depleted: depletedItems,
-            recommendations: recItems,
-            summary: document.getElementById('pharmacistSummaryText').textContent,
-            disease: document.getElementById('diseaseSummaryText').textContent,
-            goal: document.getElementById('goalSummaryText').textContent,
-            timestamp: new Date().toLocaleString('ko-KR')
-        };
-
-        fetch(APPS_SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then(() => {
-            resultDiv.style.display = 'block';
-            resultDiv.style.background = '#e8f5e9';
-            resultDiv.style.border = '1px solid #a5d6a7';
-            resultDiv.style.color = '#2e7d32';
-            resultDiv.innerHTML = '✅ <strong>전송 완료!</strong><br>' + PHARMACY_NAME + ' 약사님이 결과를 확인할 수 있습니다.';
-            btn.textContent = '✅ 전송 완료';
-            btn.style.background = '#43a047';
-            document.getElementById('consentCheck').disabled = true;
-        }).catch((err) => {
-            resultDiv.style.display = 'block';
-            resultDiv.style.background = '#ffebee';
-            resultDiv.style.border = '1px solid #ef9a9a';
-            resultDiv.style.color = '#c62828';
-            resultDiv.innerHTML = '❌ 전송 실패. 인터넷 연결을 확인하고 다시 시도해주세요.';
-            btn.disabled = false;
-            btn.textContent = '📤 상담 결과 전송하기';
-            btn.style.opacity = '1';
-        });
+    const lastRow = sheet.getLastRow();
+    if (lastRow % 2 === 0) {
+      sheet.getRange(lastRow, 1, 1, HEADERS.length).setBackground('#f0f4f3');
     }
+  } catch(err) {
+    // 마스터 시트 오류는 무시 (약국 시트 기록은 성공했으므로)
+    console.log('마스터 시트 기록 오류: ' + err.toString());
+  }
+}
 
-    const i18n = {
-        ko: {
-            p1_title: "환영합니다!", p1_desc: "약국 대기 시간 동안,<br>나에게 꼭 맞는 영양소를 찾아보세요.", btn_start: "건강 점검 시작하기",
-            p2_title: "📝 기본 정보를 선택해주세요", q_gender: "성별", opt_male: "남성", opt_female: "여성",
-            q_age: "연령대", opt_age1: "12세 미만 (성장기 어린이)", opt_age2: "13세 ~ 18세 (청소년)", opt_age3: "19세 ~ 34세 (청년)", opt_age4: "35세 ~ 49세 (중년)", opt_age5: "50세 ~ 64세 (장년)", opt_age6: "65세 이상 (어르신)",
-            btn_next: "다음 단계로", btn_prev: "이전 단계",
-            p3_title: "🏥 건강 상태 및 목표", q_disease: "현재 앓고 있거나 치료 중인 질병", q_goal: "건강 지향점 (개선하고 싶은 점)", p3_note: "* 작성해주시면 현재 드시는 약과 충돌하지 않고, 목표에 맞는 영양제를 추천해 드립니다.",
-            p3_ph_disease: "예: 고혈압, 당뇨, 없음 ...", p3_ph_goal: "예: 임신준비, 갱년기증상완화, 수험생 기억력 개선, 피부관리, 다이어트 등",
-            p4_title: "🍚 식습관 점검", q_bf: "Q1. 아침 식사는 잘 챙기시나요?", opt_bf1: "매일 규칙적으로 먹어요", opt_bf2: "가끔 먹거나 대충 때워요", opt_bf3: "커피나 음료로 대신해요", opt_bf4: "거의 안 먹어요 (아침 결식)",
-            q_taste: "Q2. 평소 어떤 맛을 좋아하시나요?", opt_t1: "싱겁고 담백한 맛", opt_t2: "일반적인 집밥", opt_t3: "달고 짠 음식 (단짠)", opt_t4: "맵고 자극적인 국물 요리",
-            p5_title: "🍷 기호 식품 습관", q_smoke: "Q3. 담배를 태우시나요?", opt_s1: "아니오 (비흡연)", opt_s2: "가끔 (하루 5개비 미만)", opt_s3: "습관적 (하루 반 갑 정도)", opt_s4: "많이 (하루 한 갑 이상)",
-            q_alcohol: "Q4. 술은 얼마나 자주 드시나요?", opt_a1: "거의 안 마심", opt_a2: "월 2 ~ 3회 정도", opt_a3: "주 2 ~ 3회 (반주 포함)", opt_a4: "주 4회 이상 자주 마심",
-            p6_title: "🏃 생활 리듬 점검", q_exercise: "Q5. 운동은 얼마나 하시나요?", opt_ex1: "주 3회 이상 땀나게 운동", opt_ex2: "주 1 ~ 2회 가볍게", opt_ex3: "따로 운동 안 함", opt_ex4: "움직임이 거의 없음",
-            q_sleep: "Q6. 잠은 푹 주무시나요?", opt_sl1: "7시간 이상 푹 잠", opt_sl2: "6 ~ 7시간 (보통)", opt_sl3: "5 ~ 6시간 (피곤함)", opt_sl4: "5시간 미만 (항상 피곤)",
-            btn_result: "결과 보기",
-            p7_title: "😱 내 몸에서 부족해지는 영양소", p7_desc: "고객님의 생활 습관으로 인해 <strong style='color:red;'>빠져나가고 있는 영양소</strong>입니다.<br>괄호 안은 해당 영양소를 소모시키는 주요 원인입니다.",
-            res_depleted_title: "📉 고갈 주의 영양소", btn_pharm_view: "약사님께 보여줄 화면 >",
-            p8_title: "✅ 상담용 결과 화면", p8_sub: "이 화면을 약사님께 보여주세요.", pharm_sum_label: "💊 약사님 확인용 요약", label_disease: "질병", label_goal: "건강목표",
-            res_rec_title: "💡 추천 영양 성분", btn_show_answers: "📋 나의 답변 내용 전체보기", btn_home: "처음으로 돌아가기",
-            res_empty_depleted: "생활 습관이 훌륭합니다! 고갈 영양소 없음.",
-            res_empty_rec: "현재 건강 상태를 잘 유지하세요.",
-            sum_smoke: "흡연", sum_al: "음주", sum_bf: "아침", sum_taste: "식성", sum_sleep: "수면", sum_ex: "운동", sum_good: "생활습관 양호",
-            p7_title: "💊 복용 중인 약물",
-            p7_sub: "복용 중인 약은 체내 영양소를 소모시킬 수 있습니다.<br>해당하는 것을 <strong>모두 선택</strong>해 주세요. (없으면 마지막 항목 선택)",
-            opt_bp: "혈압약", sub_bp: "이뇨제 / ACE억제제 / ARB 계열",
-            opt_dm: "당뇨약", sub_dm: "메트포르민 / 인슐린 계열",
-            opt_chol: "콜레스테롤약", sub_chol: "스타틴 계열 (아토르바스타틴 등)",
-            opt_gi: "위장약", sub_gi: "PPI / H2차단제 / 제산제 계열",
-            opt_meds_none: "복용 약물 없음",
-            chart_title: "📊 영양소 상태 분석", chart_ok: "✅ 영양소 상태 양호",
-            status_bad: "부족", status_warn: "주의", status_good: "양호",
-            sum_meds: "복용약물"
-        },
-        en: {
-            p1_title: "Welcome!", p1_desc: "While waiting, find out which nutrients<br>your body needs the most.", btn_start: "Start Health Check",
-            p2_title: "📝 Basic Information", q_gender: "Gender", opt_male: "Male", opt_female: "Female",
-            q_age: "Age Group", opt_age1: "Under 12 (Growth)", opt_age2: "13-18 (Teens)", opt_age3: "19-34 (Young Adult)", opt_age4: "35-49 (Middle Age)", opt_age5: "50-64 (Senior)", opt_age6: "65+ (Elderly)",
-            btn_next: "Next", btn_prev: "Previous",
-            p3_title: "🏥 Health Status & Goals", q_disease: "Current Diseases or Treatments", q_goal: "Health Goals (Needs)", p3_note: "* We will recommend supplements that do not conflict with your current medication.",
-            p3_ph_disease: "e.g., Hypertension, Diabetes, None...", p3_ph_goal: "e.g., Pregnancy prep, Menopause, Memory, Skin, Diet...",
-            p4_title: "🍚 Dietary Habits", q_bf: "Q1. Do you eat breakfast?", opt_bf1: "Yes, regularly", opt_bf2: "Sometimes / Lightly", opt_bf3: "Just coffee/drinks", opt_bf4: "Rarely (Skip)",
-            q_taste: "Q2. Preferred Taste?", opt_t1: "Bland / Plain", opt_t2: "Normal home cooking", opt_t3: "Sweet & Salty", opt_t4: "Spicy & Hot",
-            p5_title: "🍷 Lifestyle Habits", q_smoke: "Q3. Do you smoke?", opt_s1: "No (Non-smoker)", opt_s2: "Occasionally (<5/day)", opt_s3: "Habitually (~10/day)", opt_s4: "Heavy (>20/day)",
-            q_alcohol: "Q4. Alcohol Consumption?", opt_a1: "Rarely", opt_a2: "2-3 times/month", opt_a3: "2-3 times/week", opt_a4: "4+ times/week",
-            p6_title: "🏃 Rhythm of Life", q_exercise: "Q5. How much do you exercise?", opt_ex1: "3+ times/week (Sweat)", opt_ex2: "1-2 times/week (Light)", opt_ex3: "Rarely", opt_ex4: "Sedentary",
-            q_sleep: "Q6. Sleep Quality?", opt_sl1: "7+ hours (Deep)", opt_sl2: "6-7 hours (Normal)", opt_sl3: "5-6 hours (Tired)", opt_sl4: "<5 hours (Exhausted)",
-            btn_result: "See Results",
-            p7_title: "😱 Depleted Nutrients", p7_desc: "Nutrients being <strong style='color:red;'>depleted</strong> due to your lifestyle.<br>(Parentheses indicate the main cause)",
-            res_depleted_title: "📉 Depletion Alert", btn_pharm_view: "For Pharmacist View >",
-            p8_title: "✅ Pharmacist Summary", p8_sub: "Please show this screen to the pharmacist.", pharm_sum_label: "💊 Summary", label_disease: "Disease", label_goal: "Goal",
-            res_rec_title: "💡 Recommended", btn_show_answers: "📋 Show My Answers", btn_home: "Back to Home",
-            res_empty_depleted: "Excellent lifestyle! No major depletion.",
-            res_empty_rec: "Maintain your current healthy status.",
-            sum_smoke: "Smoke", sum_al: "Alcohol", sum_bf: "Breakfast", sum_taste: "Taste", sum_sleep: "Sleep", sum_ex: "Exercise", sum_good: "Good Lifestyle",
-            p7_title: "💊 Current Medications",
-            p7_sub: "Medications can deplete key nutrients in your body.<br>Please check <strong>all that apply</strong>. (Select last option if none)",
-            opt_bp: "Blood Pressure Medication", sub_bp: "Diuretics / ACE Inhibitors / ARBs",
-            opt_dm: "Diabetes Medication", sub_dm: "Metformin / Insulin Class",
-            opt_chol: "Cholesterol Medication", sub_chol: "Statins (Atorvastatin etc.)",
-            opt_gi: "GI Medication", sub_gi: "PPI / H2-Blockers / Antacids",
-            opt_meds_none: "No Medication",
-            chart_title: "📊 Nutrient Status", chart_ok: "✅ Nutrients are in good standing",
-            status_bad: "Deficient", status_warn: "Caution", status_good: "Good",
-            sum_meds: "Medications"
-        }
-    };
+// ================================================================
+//  GET — 약국 시트 URL 조회 (어드민용)
+//  사용법: APPS_SCRIPT_URL?action=getUrl&pharmacy=songpa001
+// ================================================================
+function doGet(e) {
+  const action = e.parameter.action;
+  const pharmacyCode = e.parameter.pharmacy;
 
-    let currentLang = 'ko';
-    let userData = {};
+  if (action === 'getUrl' && pharmacyCode) {
+    const folder = DriveApp.getFolderById(ADMIN_FOLDER_ID);
+    const files = folder.getFilesByName(pharmacyCode);
 
-    function toggleLanguage() {
-        currentLang = currentLang === 'ko' ? 'en' : 'ko';
-        const langData = i18n[currentLang];
-        document.querySelectorAll('[data-i18n]').forEach(el => {
-            const key = el.getAttribute('data-i18n');
-            if(langData[key]) el.innerHTML = langData[key];
-        });
-        document.getElementById('diseaseInput').placeholder = langData['p3_ph_disease'];
-        document.getElementById('goalInput').placeholder = langData['p3_ph_goal'];
-        document.querySelector('.lang-btn').textContent = currentLang === 'ko' ? '🇰🇷/🇺🇸 Eng' : '🇰🇷/🇺🇸 Kor';
+    if (files.hasNext()) {
+      const file = files.next();
+      const ss = SpreadsheetApp.openById(file.getId());
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          status: 'ok',
+          url: ss.getUrl(),
+          name: file.getName()
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'not_found' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 
-    function toggleFontSize() {
-        const body = document.body;
-        const btn = document.querySelector('.font-toggle-btn');
-        if (body.classList.contains('normal-mode')) {
-            body.classList.remove('normal-mode');
-            body.classList.add('large-mode');
-            btn.textContent = "글자- 🔍";
-        } else {
-            body.classList.remove('large-mode');
-            body.classList.add('normal-mode');
-            btn.textContent = "글자+ 🔍";
-        }
-    }
-
-    // ===== 복용 약물 체크박스: "없음" 선택 시 나머지 해제 =====
-    document.querySelectorAll('input[name="meds"]').forEach(function(cb) {
-        cb.addEventListener('change', function() {
-            if (this.value === 'none' && this.checked) {
-                document.querySelectorAll('input[name="meds"]:not(#med_none)').forEach(function(other) {
-                    other.checked = false;
-                });
-            } else if (this.checked) {
-                document.getElementById('med_none').checked = false;
-            }
-        });
-    });
-
-    const acc = document.querySelector(".accordion");
-    acc.addEventListener("click", function() {
-        this.classList.toggle("active");
-        const panel = this.nextElementSibling;
-        if (panel.style.maxHeight) {
-            panel.style.maxHeight = null;
-        } else {
-            panel.style.maxHeight = panel.scrollHeight + "px";
-        }
-    });
-
-    function nextPage(pageNum) {
-        if (pageNum === 2) {
-            if (!document.querySelector('input[name="gender"]:checked') || !document.querySelector('input[name="age"]:checked')) {
-                alert(currentLang === 'ko' ? "성별과 연령대를 선택해주세요." : "Please select gender and age.");
-                return;
-            }
-        }
-        if(pageNum === 3) {
-            userData.disease = document.getElementById('diseaseInput').value;
-            userData.goal = document.getElementById('goalInput').value;
-        }
-        document.getElementById('p' + pageNum).classList.remove('active');
-        document.getElementById('p' + (pageNum + 1)).classList.add('active');
-        window.scrollTo(0, 0);
-    }
-
-    function prevPage(currentPageNum) {
-        document.getElementById('p' + currentPageNum).classList.remove('active');
-        document.getElementById('p' + (currentPageNum - 1)).classList.add('active');
-        window.scrollTo(0, 0);
-    }
-
-    function addLog(targetObj, item, cause) {
-        if (!targetObj[item]) targetObj[item] = [];
-        if (!targetObj[item].includes(cause)) targetObj[item].push(cause);
-    }
-
-    function getLabelText(inputName) {
-        const el = document.querySelector(`input[name="${inputName}"]:checked`);
-        if(el) {
-            return document.querySelector(`label[for="${el.id}"]`).innerText;
-        }
-        return "";
-    }
-
-    function getKey(k_ko, k_en) {
-        return currentLang === 'ko' ? k_ko : k_en;
-    }
-
-    function calculateAndShowResults() {
-        const gender = document.querySelector('input[name="gender"]:checked').value;
-        const ageEl = document.querySelector('input[name="age"]:checked');
-        const ageVal = ageEl.value;
-        
-        const bfScore = parseInt(document.querySelector('input[name="breakfast"]:checked').value);
-        const tasteScore = parseInt(document.querySelector('input[name="taste"]:checked').value);
-        const smokeScore = parseInt(document.querySelector('input[name="smoke"]:checked').value);
-        const alScore = parseInt(document.querySelector('input[name="alcohol"]:checked').value);
-        const exScore = parseInt(document.querySelector('input[name="exercise"]:checked').value);
-        const slScore = parseInt(document.querySelector('input[name="sleep"]:checked').value);
-
-        let depletedMap = {};
-        let productsMap = {};
-
-        if (smokeScore >= 1) {
-            addLog(depletedMap, getKey("비타민 C", "Vitamin C"), getKey("흡연", "Smoking"));
-            if(smokeScore >= 2) addLog(productsMap, getKey("고함량 비타민C", "High-dose Vit C"), getKey("흡연 과다", "Heavy Smoking"));
-        }
-        if (alScore >= 1) {
-            addLog(depletedMap, getKey("비타민 B1", "Vitamin B1"), getKey("알코올 분해", "Alcohol Metabolism"));
-            addLog(depletedMap, getKey("마그네슘", "Magnesium"), getKey("이뇨작용", "Diuretic Effect"));
-            if(alScore >= 2) {
-                addLog(productsMap, getKey("밀크씨슬", "Milk Thistle"), getKey("간 건강", "Liver Health"));
-                addLog(productsMap, getKey("비타민B 컴플렉스", "Vit B Complex"), getKey("에너지 대사", "Energy Metabolism"));
-            }
-        }
-        if (bfScore >= 2) {
-            addLog(depletedMap, getKey("단백질/비타민", "Protein/Vitamins"), getKey("아침 결식", "Skip Breakfast"));
-            addLog(productsMap, getKey("종합 영양제", "Multivitamin"), getKey("기초 영양 보충", "Basic Nutrition"));
-        }
-        if (tasteScore >= 2) {
-            addLog(depletedMap, getKey("칼슘/마그네슘", "Ca/Mg"), getKey("나트륨 배출", "Sodium Excretion"));
-            addLog(productsMap, getKey("유산균", "Probiotics"), getKey("장 환경 개선", "Gut Health"));
-        }
-        if (slScore >= 2) {
-            addLog(depletedMap, getKey("코엔자임Q10", "CoQ10"), getKey("피로", "Fatigue"));
-            addLog(productsMap, getKey("마그네슘/테아닌", "Mg/Theanine"), getKey("수면/이완", "Sleep/Relax"));
-        }
-        if (exScore >= 2) {
-            addLog(depletedMap, getKey("비타민 D", "Vitamin D"), getKey("햇빛 부족", "Lack of Sun"));
-            addLog(productsMap, getKey("비타민 D", "Vitamin D"), getKey("결핍 예방", "Deficiency Prev"));
-        }
-
-        // ===== Drug Mugger — 복용 약물별 영양소 고갈 =====
-        const drugMugger = {
-            bp: {
-                ko: { r: '혈압약(이뇨제/ACE)', n: ['코엔자임Q10', '아연', '비타민 B6', '마그네슘', '칼륨'] },
-                en: { r: 'BP Drugs', n: ['CoQ10', 'Zinc', 'Vit B6', 'Magnesium', 'Potassium'] }
-            },
-            dm: {
-                ko: { r: '당뇨약(메트포르민)', n: ['비타민 B12', '엽산', '코엔자임Q10'] },
-                en: { r: 'Diabetes Drugs', n: ['Vitamin B12', 'Folic Acid', 'CoQ10'] }
-            },
-            chol: {
-                ko: { r: '콜레스테롤약(스타틴)', n: ['코엔자임Q10', '비타민 D', '비타민 B12'] },
-                en: { r: 'Statins', n: ['CoQ10', 'Vitamin D', 'Vitamin B12'] }
-            },
-            gi: {
-                ko: { r: '위장약(PPI/제산제)', n: ['비타민 B12', '마그네슘', '칼슘', '철분', '아연'] },
-                en: { r: 'GI Drugs (PPI)', n: ['Vitamin B12', 'Magnesium', 'Calcium', 'Iron', 'Zinc'] }
-            }
-        };
-
-        const selectedMeds = Array.from(document.querySelectorAll('input[name="meds"]:checked'))
-            .map(function(cb) { return cb.value; })
-            .filter(function(v) { return v !== 'none'; });
-
-        const medLang = currentLang === 'ko' ? 'ko' : 'en';
-        selectedMeds.forEach(function(med) {
-            const d = drugMugger[med][medLang];
-            d.n.forEach(function(nutrient) { addLog(depletedMap, nutrient, d.r); });
-            // 추천 영양제 연결
-            if (med === 'bp') {
-                addLog(productsMap, getKey('코엔자임Q10', 'CoQ10'), getKey('심혈관 보호', 'Cardio Protection'));
-                addLog(productsMap, getKey('마그네슘', 'Magnesium'), getKey('혈압 관리', 'BP Support'));
-            }
-            if (med === 'dm') {
-                addLog(productsMap, getKey('비타민 B12', 'Vitamin B12'), getKey('신경 보호', 'Nerve Protection'));
-                addLog(productsMap, getKey('크롬/알파리포산', 'Chromium/ALA'), getKey('혈당 관리', 'Blood Sugar'));
-            }
-            if (med === 'chol') {
-                addLog(productsMap, getKey('코엔자임Q10', 'CoQ10'), getKey('근육 보호', 'Muscle Protection'));
-                addLog(productsMap, getKey('비타민 D', 'Vitamin D'), getKey('골격 건강', 'Bone Health'));
-            }
-            if (med === 'gi') {
-                addLog(productsMap, getKey('유산균', 'Probiotics'), getKey('장 환경 복구', 'Gut Restoration'));
-                addLog(productsMap, getKey('비타민 B12', 'Vitamin B12'), getKey('위산저하 보완', 'Acid Compensation'));
-            }
-        });
-
-        const ageReason = getKey("연령별 필요", "Age Requirement");
-        if(ageVal === 'growth') addLog(productsMap, getKey("성장기 영양제", "Growth Supple"), ageReason);
-        else if(ageVal === 'teen') {
-            addLog(productsMap, getKey("비타민B군", "Vit B Group"), getKey("학업 에너지", "Study Energy"));
-            if(gender === 'female') addLog(productsMap, getKey("철분제", "Iron"), getKey("여성 건강", "Women's Health"));
-        }
-        else if(ageVal === 'middle') addLog(productsMap, getKey("오메가3", "Omega-3"), getKey("혈행 관리", "Circulation"));
-        else if(ageVal === 'late_middle' || ageVal === 'senior') {
-            addLog(productsMap, getKey("칼슘/마그네슘", "Calcium/Magnesium"), getKey("뼈 건강", "Bone Health"));
-            addLog(productsMap, getKey("단백질", "Protein"), getKey("근육 유지", "Muscle Maint"));
-        }
-
-        const userGoal = (userData.goal || "").toLowerCase();
-        const goalReason = getKey("건강 목표", "Health Goal");
-
-        if(userGoal.includes("임신") || userGoal.includes("pregnan")) addLog(productsMap, getKey("엽산 & 비타민D", "Folic Acid & Vit D"), goalReason);
-        if(userGoal.includes("갱년기") || userGoal.includes("meno")) addLog(productsMap, getKey("피크노제놀/이소플라본", "Pycnogenol/Isoflavone"), goalReason);
-        if(userGoal.includes("기억") || userGoal.includes("brain") || userGoal.includes("수험") || userGoal.includes("study")) addLog(productsMap, getKey("오메가3 & 레시틴", "Omega-3 & Lecithin"), goalReason);
-        if(userGoal.includes("피부") || userGoal.includes("skin")) addLog(productsMap, getKey("콜라겐 & 비타민C", "Collagen & Vit C"), goalReason);
-        if(userGoal.includes("다이어트") || userGoal.includes("diet") || userGoal.includes("weight")) addLog(productsMap, getKey("가르시니아/유산균", "Garcinia/Probiotics"), goalReason);
-        if(userGoal.includes("눈") || userGoal.includes("eye")) addLog(productsMap, getKey("루테인/아스타잔틴", "Lutein/Astaxanthin"), goalReason);
-
-        function renderList(targetId, dataMap, emptyMsg) {
-            const listEl = document.getElementById(targetId);
-            listEl.innerHTML = "";
-            const keys = Object.keys(dataMap);
-            if (keys.length === 0) {
-                listEl.innerHTML = `<li>${emptyMsg}</li>`;
-            } else {
-                keys.forEach(key => {
-                    let causes = dataMap[key].join(", ");
-                    let li = document.createElement('li');
-                    if(targetId === 'productRecs') {
-                        li.style.borderColor = "#2e7d32";
-                        li.innerHTML = `${key} <span class="reason-text">└ 💡 ${causes}</span>`;
-                    } else {
-                        li.style.borderColor = "#ff9800";
-                        li.innerHTML = `${key} <span class="cause-text">(${causes})</span>`;
-                    }
-                    listEl.appendChild(li);
-                });
-            }
-        }
-
-        renderList('depletedList', depletedMap, i18n[currentLang].res_empty_depleted);
-        renderList('productRecs', productsMap, i18n[currentLang].res_empty_rec);
-        renderNutrientBars(depletedMap);
-
-        let summaryParts = [];
-        const genderTxt = document.querySelector(`label[for="g_${gender === 'male' ? 'm' : 'f'}"]`).innerText;
-        const ageTxt = document.querySelector(`label[for="${ageEl.id}"]`).innerText;
-        summaryParts.push(`${ageTxt} ${genderTxt}`);
-        
-        const txt = i18n[currentLang];
-        const smokeTxt = document.querySelector('input[name="smoke"]:checked').nextElementSibling.innerText;
-        const alTxt = document.querySelector('input[name="alcohol"]:checked').nextElementSibling.innerText;
-
-        if(smokeScore > 0) summaryParts.push(`${txt.sum_smoke}(${smokeTxt})`);
-        if(alScore > 1) summaryParts.push(`${txt.sum_al}(${alTxt})`);
-        if(bfScore > 1) summaryParts.push(txt.sum_bf);
-        if(tasteScore > 1) summaryParts.push(txt.sum_taste);
-        if(slScore > 1) summaryParts.push(txt.sum_sleep);
-        if(exScore > 1) summaryParts.push(txt.sum_ex);
-        if(summaryParts.length <= 1) summaryParts.push(txt.sum_good);
-        // pharmacistSummaryText는 아래 약물 추가 후 설정됨
-
-        document.getElementById('diseaseSummaryText').textContent = userData.disease ? userData.disease : (currentLang === 'ko' ? "없음" : "None");
-        document.getElementById('goalSummaryText').textContent = userData.goal ? userData.goal : (currentLang === 'ko' ? "없음" : "None");
-
-        const answersList = document.getElementById('myAnswersList');
-        answersList.innerHTML = `
-            <li><strong>${genderTxt}/${ageTxt}</strong></li>
-            <li><strong>${txt.label_disease}:</strong> ${userData.disease || '-'}</li>
-            <li><strong>${txt.label_goal}:</strong> ${userData.goal || '-'}</li>
-            <li><strong>${txt.sum_bf}:</strong> ${getLabelText('breakfast')}</li>
-            <li><strong>${txt.sum_taste}:</strong> ${getLabelText('taste')}</li>
-            <li><strong>${txt.sum_smoke}:</strong> ${getLabelText('smoke')}</li>
-            <li><strong>${txt.sum_al}:</strong> ${getLabelText('alcohol')}</li>
-            <li><strong>${txt.sum_ex}:</strong> ${getLabelText('exercise')}</li>
-            <li><strong>${txt.sum_sleep}:</strong> ${getLabelText('sleep')}</li>
-        `;
-
-        collectData = {
-            gender: document.querySelector(`label[for="g_${gender === 'male' ? 'm' : 'f'}"]`).innerText,
-            age: document.querySelector(`label[for="${ageEl.id}"]`).innerText,
-            breakfast: getLabelText('breakfast'),
-            taste: getLabelText('taste'),
-            smoke: getLabelText('smoke'),
-            alcohol: getLabelText('alcohol'),
-            exercise: getLabelText('exercise'),
-            sleep: getLabelText('sleep')
-        };
-
-        const consentCheck = document.getElementById('consentCheck');
-        const submitBtn = document.getElementById('submitBtn');
-        const submitResult = document.getElementById('submitResult');
-        if (consentCheck) { consentCheck.checked = false; consentCheck.disabled = false; }
-        if (submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '0.4'; submitBtn.style.background = '#1565c0'; submitBtn.textContent = '📤 상담 결과 전송하기'; }
-        if (submitResult) { submitResult.style.display = 'none'; }
-
-        // 복용약물 요약 추가
-        if (selectedMeds.length > 0) {
-            const medNames = selectedMeds.map(function(m) {
-                return { bp:'혈압약', dm:'당뇨약', chol:'콜레스테롤약', gi:'위장약' }[m] || m;
-            });
-            summaryParts.push((i18n[currentLang].sum_meds || '복용약물') + '(' + medNames.join('·') + ')');
-        }
-        document.getElementById('pharmacistSummaryText').textContent = summaryParts.join(" | ");
-
-        nextPage(7);  // p7(약물) → p8(결과)
-    }
-
-    // ===== 영양소 상태 바 차트 렌더링 =====
-    function renderNutrientBars(depletedMap) {
-        var lang = i18n[currentLang];
-        var statuses = [];
-
-        Object.keys(depletedMap).forEach(function(name) {
-            var score = depletedMap[name].length;
-            var level, colorClass, statusText, statusClass;
-            if (score >= 3) {
-                level = 18; colorClass = 'red';
-                statusText = lang.status_bad || '부족'; statusClass = 'status-bad';
-            } else if (score >= 2) {
-                level = 38; colorClass = 'orange';
-                statusText = lang.status_warn || '주의'; statusClass = 'status-warn';
-            } else {
-                level = 55; colorClass = 'orange';
-                statusText = lang.status_warn || '주의'; statusClass = 'status-warn';
-            }
-            statuses.push({ name: name, level: level, colorClass: colorClass, statusText: statusText, statusClass: statusClass });
-        });
-
-        // 부족한 순서로 정렬
-        statuses.sort(function(a, b) { return a.level - b.level; });
-
-        var container = document.getElementById('nutrientBarsContainer');
-        if (!container) return;
-        container.innerHTML = '';
-
-        if (statuses.length === 0) {
-            container.innerHTML = '<p style="color:#43a047; text-align:center; font-weight:bold; padding:10px 0;">' + (lang.chart_ok || '✅ 영양소 상태 양호') + '</p>';
-            return;
-        }
-
-        statuses.forEach(function(ns) {
-            var div = document.createElement('div');
-            div.className = 'nutrient-bar-row';
-            div.innerHTML =
-                '<div class="nutrient-bar-label">' +
-                    '<span class="nutrient-bar-name">' + ns.name + '</span>' +
-                    '<span class="nutrient-bar-status ' + ns.statusClass + '">' + ns.statusText + '</span>' +
-                '</div>' +
-                '<div class="nutrient-bar-track">' +
-                    '<div class="nutrient-bar nutrient-bar-' + ns.colorClass + '" data-target="' + ns.level + '"></div>' +
-                '</div>';
-            container.appendChild(div);
-        });
-
-        // 애니메이션: 약간 딜레이 후 width 적용
-        setTimeout(function() {
-            document.querySelectorAll('#nutrientBarsContainer .nutrient-bar').forEach(function(bar) {
-                bar.style.width = bar.getAttribute('data-target') + '%';
-            });
-        }, 120);
-    }
-</script>
-</body>
-</html>
+  return ContentService
+    .createTextOutput('PharmacyQR Admin API v2.0 — OK')
+    .setMimeType(ContentService.MimeType.TEXT);
+}
