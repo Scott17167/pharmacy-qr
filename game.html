@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>3D 큐브 퍼즐</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #6c63ff;
+      --primary-dark: #574fd6;
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --surface2: #0f3460;
+      --text: #e0e0e0;
+      --text-dim: #8888aa;
+      --radius: 14px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Sans KR', sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px 20px 10px;
+      background: var(--surface);
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    #top-bar h1 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #fff;
+    }
+
+    #hud {
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 20px;
+      background: var(--surface);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+
+    .hud-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .hud-label {
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .hud-value {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #fff;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    #canvas-container {
+      flex: 1;
+      position: relative;
+      touch-action: none;
+      overflow: hidden;
+    }
+
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #controls {
+      display: flex;
+      gap: 10px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+
+    .ctrl-btn {
+      flex: 1;
+      padding: 14px 8px;
+      border: none;
+      border-radius: var(--radius);
+      font-family: 'Noto Sans KR', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .ctrl-btn:active { transform: scale(0.96); opacity: 0.85; }
+
+    #btn-shuffle {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    #btn-reset {
+      background: var(--surface2);
+      color: var(--text);
+    }
+
+    /* Hint text */
+    #hint {
+      position: absolute;
+      bottom: 12px;
+      left: 0; right: 0;
+      text-align: center;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* Win overlay */
+    #win-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s;
+    }
+
+    #win-overlay.visible {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    #win-card {
+      background: var(--surface);
+      border-radius: 20px;
+      padding: 36px 28px;
+      text-align: center;
+      max-width: 300px;
+      width: 85%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      border: 1px solid rgba(108,99,255,0.3);
+    }
+
+    #win-card h2 {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+
+    #win-stats {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+      line-height: 1.8;
+      margin-bottom: 24px;
+    }
+
+    #win-stats strong { color: var(--text); }
+
+    #btn-new-game {
+      width: 100%;
+      background: var(--primary);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+<div id="top-bar">
+  <h1>3D 큐브 퍼즐</h1>
+</div>
+
+<div id="hud">
+  <div class="hud-item">
+    <span class="hud-label">이동</span>
+    <span class="hud-value" id="moves">0</span>
+  </div>
+  <div class="hud-item">
+    <span class="hud-label">시간</span>
+    <span class="hud-value" id="timer">00:00</span>
+  </div>
+</div>
+
+<div id="canvas-container">
+  <canvas id="game-canvas"></canvas>
+  <div id="hint">큐브 면을 스와이프하여 회전 · 바깥쪽을 드래그하면 시점 변경</div>
+</div>
+
+<div id="controls">
+  <button id="btn-shuffle" class="ctrl-btn">🔀 셔플</button>
+  <button id="btn-reset" class="ctrl-btn">↺ 초기화</button>
+</div>
+
+<div id="win-overlay">
+  <div id="win-card">
+    <h2>완성! 🎉</h2>
+    <p id="win-stats"></p>
+    <button id="btn-new-game" class="ctrl-btn">새 게임</button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+// ─────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────
+const COLORS = [
+  0xffffff, // 0 U white
+  0xffdd00, // 1 D yellow
+  0xff3030, // 2 F red
+  0xff8800, // 3 B orange
+  0x3399ff, // 4 L blue
+  0x33cc44, // 5 R green
+];
+const DARK = 0x111111;
+const ANIM_FRAMES = 12; // frames per face rotation (~200ms @ 60fps)
+
+// Face index on BoxGeometry: +x=0 -x=1 +y=2 -y=3 +z=4 -z=5
+// Cube face IDs: U=0 D=1 F=2 B=3 L=4 R=5
+// Cubie pos y=1 → U(white), y=-1 → D(yellow)
+//            z=1 → F(red),  z=-1 → B(orange)
+//            x=-1 → L(blue), x=1 → R(green)
+
+// ─────────────────────────────────────────────
+// Three.js setup
+// ─────────────────────────────────────────────
+const canvas = document.getElementById('game-canvas');
+const container = document.getElementById('canvas-container');
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x1a1a2e);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.set(0, 0, 7);
+camera.lookAt(0, 0, 0);
+
+const scene = new THREE.Scene();
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight.position.set(5, 10, 7.5);
+scene.add(dirLight);
+
+function resizeRenderer() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resizeRenderer();
+window.addEventListener('resize', resizeRenderer);
+
+// ─────────────────────────────────────────────
+// Cube group
+// ─────────────────────────────────────────────
+const cubeGroup = new THREE.Group();
+// Tilt for nicer initial view
+cubeGroup.rotation.x = 0.4;
+cubeGroup.rotation.y = 0.6;
+scene.add(cubeGroup);
+
+// ─────────────────────────────────────────────
+// Cubie factory
+// ─────────────────────────────────────────────
+function makeMaterial(color) {
+  return new THREE.MeshLambertMaterial({ color });
+}
+
+function cubieFaceColors(x, y, z) {
+  // Returns [+x, -x, +y, -y, +z, -z] colors
+  return [
+    x === 1  ? COLORS[5] : DARK, // R
+    x === -1 ? COLORS[4] : DARK, // L
+    y === 1  ? COLORS[0] : DARK, // U
+    y === -1 ? COLORS[1] : DARK, // D
+    z === 1  ? COLORS[2] : DARK, // F
+    z === -1 ? COLORS[3] : DARK, // B
+  ];
+}
+
+const cubies = [];
+
+function buildCube() {
+  // Remove existing cubies
+  while (cubies.length) {
+    const c = cubies.pop();
+    cubeGroup.remove(c);
+    c.geometry.dispose();
+    c.material.forEach(m => m.dispose());
+  }
+
+  for (let x = -1; x <= 1; x++) {
+    for (let y = -1; y <= 1; y++) {
+      for (let z = -1; z <= 1; z++) {
+        const geo = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+        const mats = cubieFaceColors(x, y, z).map(makeMaterial);
+        const mesh = new THREE.Mesh(geo, mats);
+        mesh.position.set(x, y, z);
+        mesh.userData.pos = new THREE.Vector3(x, y, z);
+        cubeGroup.add(mesh);
+        cubies.push(mesh);
+      }
+    }
+  }
+}
+
+buildCube();
+
+// ─────────────────────────────────────────────
+// Logical state (6 faces, each 3×3)
+// Face order: U=0 D=1 F=2 B=3 L=4 R=5
+// ─────────────────────────────────────────────
+function solvedState() {
+  return [0,1,2,3,4,5].map(i => Array.from({length:3}, () => Array(3).fill(i)));
+}
+
+let logicalState = solvedState();
+
+function isSolved() {
+  return logicalState.every(face => face.flat().every(c => c === face[0][0]));
+}
+
+// ─────────────────────────────────────────────
+// Animation state
+// ─────────────────────────────────────────────
+let currentAnim = null; // { pivot, axis, targetAngle, frame, cubies, onDone }
+let isAnimating = false;
+
+// ─────────────────────────────────────────────
+// Layer rotation
+// ─────────────────────────────────────────────
+function easeInOut(t) {
+  return t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+}
+
+function rotateLayer(axis, layerIndex, dir, onDone) {
+  if (isAnimating) return false;
+
+  // Collect cubies in this layer
+  const layer = cubies.filter(c => Math.round(c.userData.pos[axis]) === layerIndex);
+
+  // Create pivot
+  const pivot = new THREE.Group();
+  scene.add(pivot);
+  layer.forEach(c => {
+    cubeGroup.remove(c);
+    // Keep world position
+    pivot.add(c);
+  });
+
+  const targetAngle = dir * Math.PI / 2;
+
+  isAnimating = true;
+  currentAnim = {
+    pivot, axis, targetAngle,
+    frame: 0, total: ANIM_FRAMES,
+    layerCubies: layer,
+    onDone
+  };
+  return true;
+}
+
+function finishAnim(anim) {
+  const { pivot, axis, targetAngle, layerCubies } = anim;
+
+  // Apply final rotation exactly
+  pivot.rotation[axis] = targetAngle;
+  pivot.updateMatrixWorld();
+
+  layerCubies.forEach(c => {
+    // Get world position/quaternion
+    const wPos = new THREE.Vector3();
+    const wQuat = new THREE.Quaternion();
+    c.getWorldPosition(wPos);
+    c.getWorldQuaternion(wQuat);
+
+    pivot.remove(c);
+    cubeGroup.add(c);
+
+    // Apply world transform in local (cubeGroup) space
+    const localPos = cubeGroup.worldToLocal(wPos);
+    c.position.copy(localPos);
+    // Snap to nearest integer
+    c.position.x = Math.round(c.position.x);
+    c.position.y = Math.round(c.position.y);
+    c.position.z = Math.round(c.position.z);
+    c.userData.pos.copy(c.position);
+
+    // Apply rotation
+    const parentQuat = new THREE.Quaternion();
+    cubeGroup.getWorldQuaternion(parentQuat);
+    parentQuat.invert();
+    c.quaternion.copy(parentQuat).multiply(wQuat);
+  });
+
+  scene.remove(pivot);
+  isAnimating = false;
+  currentAnim = null;
+
+  if (anim.onDone) anim.onDone();
+}
+
+// ─────────────────────────────────────────────
+// HUD / Timer
+// ─────────────────────────────────────────────
+let moveCount = 0;
+let timerStart = null;
+let timerInterval = null;
+let shuffling = false;
+
+function updateMoves(n) {
+  moveCount = n;
+  document.getElementById('moves').textContent = n;
+}
+
+function startTimer() {
+  if (timerInterval) return;
+  timerStart = Date.now();
+  timerInterval = setInterval(() => {
+    const s = Math.floor((Date.now() - timerStart) / 1000);
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    document.getElementById('timer').textContent = `${mm}:${ss}`;
+  }, 1000);
+}
+
+function stopTimer() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+}
+
+function resetHUD() {
+  stopTimer();
+  timerStart = null;
+  updateMoves(0);
+  document.getElementById('timer').textContent = '00:00';
+}
+
+function elapsedStr() {
+  if (!timerStart) return '00:00';
+  const s = Math.floor((Date.now() - timerStart) / 1000);
+  return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+}
+
+// ─────────────────────────────────────────────
+// Win
+// ─────────────────────────────────────────────
+function showWin() {
+  stopTimer();
+  const overlay = document.getElementById('win-overlay');
+  document.getElementById('win-stats').innerHTML =
+    `이동 횟수: <strong>${moveCount}</strong><br>소요 시간: <strong>${elapsedStr()}</strong>`;
+  overlay.classList.add('visible');
+}
+
+document.getElementById('win-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('win-overlay') ||
+      e.target === document.getElementById('btn-new-game')) {
+    document.getElementById('win-overlay').classList.remove('visible');
+    resetGame();
+  }
+});
+
+// ─────────────────────────────────────────────
+// Shuffle
+// ─────────────────────────────────────────────
+const AXES = ['x','y','z'];
+const LAYERS = [-1, 0, 1];
+
+function doShuffle(n = 20) {
+  if (isAnimating) return;
+  shuffling = true;
+  resetHUD();
+  document.getElementById('win-overlay').classList.remove('visible');
+
+  const moves = [];
+  for (let i = 0; i < n; i++) {
+    let m;
+    do {
+      m = {
+        axis: AXES[Math.floor(Math.random()*3)],
+        layer: LAYERS[Math.floor(Math.random()*3)],
+        dir: Math.random() < 0.5 ? 1 : -1
+      };
+    } while (i > 0 && cancels(m, moves[i-1]));
+    moves.push(m);
+  }
+
+  let i = 0;
+  function next() {
+    if (i >= moves.length) { shuffling = false; return; }
+    const m = moves[i++];
+    rotateLayer(m.axis, m.layer, m.dir, () => {
+      setTimeout(next, 30);
+    });
+  }
+  next();
+}
+
+function cancels(a, b) {
+  return a.axis === b.axis && a.layer === b.layer && a.dir === -b.dir;
+}
+
+// ─────────────────────────────────────────────
+// Reset
+// ─────────────────────────────────────────────
+function resetGame() {
+  if (isAnimating) return;
+  shuffling = false;
+  buildCube();
+  logicalState = solvedState();
+  resetHUD();
+  document.getElementById('win-overlay').classList.remove('visible');
+}
+
+document.getElementById('btn-shuffle').addEventListener('click', doShuffle);
+document.getElementById('btn-reset').addEventListener('click', resetGame);
+
+// ─────────────────────────────────────────────
+// Touch input
+// ─────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+
+let touchStart = null; // { x, y, hit: null | { cubie, faceIndex, normal } }
+let orbitStart = null; // { x, y, quat }
+
+function ndc(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1
+  );
+}
+
+function raycastCubies(pt) {
+  raycaster.setFromCamera(pt, camera);
+  const hits = raycaster.intersectObjects(cubies);
+  if (!hits.length) return null;
+  return hits[0];
+}
+
+container.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (isAnimating) return;
+  const t = e.touches[0];
+  const pt = ndc(t.clientX, t.clientY);
+  const hit = raycastCubies(pt);
+
+  if (hit) {
+    touchStart = {
+      x: t.clientX, y: t.clientY,
+      hit: {
+        cubie: hit.object,
+        faceIndex: hit.face.materialIndex,
+        normal: hit.face.normal.clone()
+      }
+    };
+  } else {
+    orbitStart = {
+      x: t.clientX, y: t.clientY,
+      quat: cubeGroup.quaternion.clone()
+    };
+  }
+}, { passive: false });
+
+container.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!orbitStart) return;
+  const t = e.touches[0];
+  const dx = (t.clientX - orbitStart.x) * 0.012;
+  const dy = (t.clientY - orbitStart.y) * 0.012;
+
+  const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), dx);
+  const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), dy);
+  cubeGroup.quaternion.copy(orbitStart.quat).premultiply(qY).multiply(qX);
+}, { passive: false });
+
+container.addEventListener('touchend', e => {
+  e.preventDefault();
+  orbitStart = null;
+
+  if (!touchStart) return;
+  const ts = touchStart;
+  touchStart = null;
+
+  if (isAnimating) return;
+
+  const changedTouch = e.changedTouches[0];
+  const dx = changedTouch.clientX - ts.x;
+  const dy = changedTouch.clientY - ts.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  if (dist < 15) return; // tap, not swipe
+
+  const { faceIndex, cubie } = ts.hit;
+  const move = faceIndexSwipeToMove(faceIndex, dx, dy, cubie);
+  if (!move) return;
+
+  const started = rotateLayer(move.axis, move.layer, move.dir, () => {
+    if (!shuffling) {
+      updateMoves(moveCount + 1);
+      if (moveCount === 1) startTimer();
+      if (isSolved()) showWin();
+    }
+  });
+}, { passive: false });
+
+// ─────────────────────────────────────────────
+// Face → Move mapping
+// BoxGeometry materialIndex: 0=+x 1=-x 2=+y 3=-y 4=+z 5=-z
+// ─────────────────────────────────────────────
+function faceIndexSwipeToMove(faceIndex, dx, dy, cubie) {
+  const pos = cubie.userData.pos;
+  const px = Math.round(pos.x);
+  const py = Math.round(pos.y);
+  const pz = Math.round(pos.z);
+
+  const hDom = Math.abs(dx) >= Math.abs(dy); // horizontal swipe dominant
+
+  switch (faceIndex) {
+    case 2: // +y (top face, U)
+      if (hDom) return { axis:'z', layer: pz, dir: dx > 0 ? -1 : 1 };
+      else      return { axis:'x', layer: px, dir: dy > 0 ? 1 : -1 };
+
+    case 3: // -y (bottom face, D)
+      if (hDom) return { axis:'z', layer: pz, dir: dx > 0 ? 1 : -1 };
+      else      return { axis:'x', layer: px, dir: dy > 0 ? -1 : 1 };
+
+    case 4: // +z (front face, F)
+      if (hDom) return { axis:'y', layer: py, dir: dx > 0 ? -1 : 1 };
+      else      return { axis:'x', layer: px, dir: dy > 0 ? 1 : -1 };
+
+    case 5: // -z (back face, B)
+      if (hDom) return { axis:'y', layer: py, dir: dx > 0 ? 1 : -1 };
+      else      return { axis:'x', layer: px, dir: dy > 0 ? -1 : 1 };
+
+    case 0: // +x (right face, R)
+      if (hDom) return { axis:'y', layer: py, dir: dx > 0 ? -1 : 1 };
+      else      return { axis:'z', layer: pz, dir: dy > 0 ? 1 : -1 };
+
+    case 1: // -x (left face, L)
+      if (hDom) return { axis:'y', layer: py, dir: dx > 0 ? 1 : -1 };
+      else      return { axis:'z', layer: pz, dir: dy > 0 ? -1 : 1 };
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// Render loop
+// ─────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+
+  if (currentAnim) {
+    currentAnim.frame++;
+    const t = Math.min(currentAnim.frame / currentAnim.total, 1);
+    currentAnim.pivot.rotation[currentAnim.axis] = easeInOut(t) * currentAnim.targetAngle;
+    if (t >= 1) finishAnim(currentAnim);
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate();
+</script>
+</body>
+</html>
