@@ -543,7 +543,7 @@
 
             <div class="result-card">
                 <h3 data-i18n="res_rec_title">💡 추천 영양 성분</h3>
-                <ul id="productRecs" class="result-list" style="color: #2e7d32;"></ul>
+                <div id="productRecs" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;"></div>
             </div>
 
             <button class="accordion" data-i18n="btn_show_answers">📋 나의 답변 내용 전체보기</button>
@@ -551,25 +551,34 @@
                 <ul class="review-list" id="myAnswersList"></ul>
             </div>
 
-            <div id="consentSection" style="margin-top: 25px; padding: 20px; background: #f0f7ff; border-radius: 15px; border: 2px solid #90caf9;">
+            <!-- 약사 직접 상담 박스 -->
+            <div style="margin-top: 25px; padding: 18px 20px; background: #e8f5e9; border-radius: 15px; border: 2px solid #66bb6a; text-align: center;">
+                <h3 style="color: #2e7d32; margin: 0; font-size: 1.1em;">🩺 약사님께 화면을 보여주고 상담받기</h3>
+            </div>
+
+            <!-- 전송 동의 박스 -->
+            <div id="consentSection" style="margin-top: 16px; padding: 20px; background: #f0f7ff; border-radius: 15px; border: 2px solid #90caf9;">
                 <h3 style="color: #1565c0; margin-bottom: 8px; font-size: 1.1em;">📤 상담 결과 약사님께 전송</h3>
                 <p style="font-size: 0.88em; color: #555; margin-bottom: 15px; line-height: 1.6;">
                     위의 건강 설문 결과를 약사님이 확인할 수 있도록 전송합니다.<br>
                     개인 건강 정보가 포함되므로, 동의 후 전송됩니다.
                 </p>
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 14px; background: white; border-radius: 10px; border: 1px solid #ddd; cursor: pointer;" onclick="document.getElementById('consentCheck').click()">
+                <label for="consentCheck" style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 14px; background: white; border-radius: 10px; border: 1px solid #ddd; cursor: pointer;">
                     <input type="checkbox" id="consentCheck" onchange="toggleSubmitBtn()" style="width: 24px; height: 24px; cursor: pointer; accent-color: #00897b; flex-shrink: 0;">
-                    <label for="consentCheck" style="font-weight: bold; color: #333; cursor: pointer; font-size: 0.95em; line-height: 1.4;" onclick="event.stopPropagation()">
+                    <span style="font-weight: bold; color: #333; font-size: 0.95em; line-height: 1.4;">
                         📋 상담 결과 전송에 <span style="color: #00897b;">동의합니다</span>
-                    </label>
-                </div>
+                    </span>
+                </label>
                 <button class="btn" id="submitBtn" onclick="submitConsultation()" disabled style="opacity: 0.4; background: #1565c0;">
                     📤 상담 결과 전송하기
                 </button>
                 <div id="submitResult" style="display: none; margin-top: 15px; padding: 15px; border-radius: 10px; text-align: center; font-size: 0.95em; line-height: 1.5;"></div>
             </div>
 
-            <button class="btn btn-outline" onclick="location.reload()" style="margin-top:20px;" data-i18n="btn_home">처음으로 돌아가기</button>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn btn-prev" onclick="prevPage(9)" data-i18n="btn_prev" style="flex:1;">이전 단계</button>
+                <button class="btn btn-outline" onclick="location.reload()" data-i18n="btn_home" style="flex:1;">처음으로 돌아가기</button>
+            </div>
         </div>
     </div>
 
@@ -620,7 +629,7 @@
 
         const depletedItems = Array.from(document.querySelectorAll('#depletedList li'))
             .map(li => li.innerText.replace(/\n/g, ' ')).join(' / ');
-        const recItems = Array.from(document.querySelectorAll('#productRecs li'))
+        const recItems = Array.from(document.querySelectorAll('#productRecs div'))
             .map(li => li.innerText.replace(/\n/g, ' ')).join(' / ');
 
         const payload = {
@@ -942,15 +951,17 @@
             } else {
                 keys.forEach(key => {
                     let causes = dataMap[key].join(", ");
-                    let li = document.createElement('li');
                     if(targetId === 'productRecs') {
-                        li.style.borderColor = "#2e7d32";
-                        li.innerHTML = `${key} <span class="reason-text">└ 💡 ${causes}</span>`;
+                        let tag = document.createElement('div');
+                        tag.style.cssText = "display:inline-flex; flex-direction:column; align-items:flex-start; background:#e8f5e9; border:1.5px solid #66bb6a; border-radius:12px; padding:10px 14px; min-width:120px; flex:1 1 calc(50% - 10px); box-sizing:border-box;";
+                        tag.innerHTML = `<span style="font-weight:bold; color:#1b5e20; font-size:0.95em;">✅ ${key}</span><span style="font-size:0.78em; color:#555; margin-top:4px;">💡 ${causes}</span>`;
+                        listEl.appendChild(tag);
                     } else {
+                        let li = document.createElement('li');
                         li.style.borderColor = "#ff9800";
                         li.innerHTML = `${key} <span class="cause-text">(${causes})</span>`;
+                        listEl.appendChild(li);
                     }
-                    listEl.appendChild(li);
                 });
             }
         }
